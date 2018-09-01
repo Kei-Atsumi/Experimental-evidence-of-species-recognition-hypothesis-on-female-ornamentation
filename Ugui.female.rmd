@@ -1,0 +1,234 @@
+---
+title: "Ugui_female"
+author: "Keisuke Atsumi"
+date: '`r format(Sys.time(), "%y/%m/%d %H:%M")`'
+output: html_document
+---
+
+```{r setup, eval=TRUE, include=FALSE}
+rm(list=ls())  # reset workspace
+sessionInfo()  # show R version etc
+options(scipen=100)  # do not show numbers using exponential
+
+# install & load packages
+# install.packages("tidyverse" ,"metafor", "openxlsx", "data.table")
+library(tidyverse)  # dataset modification
+library(openxlsx)  # read Excel file
+library(knitr)
+library(stats)
+library(MuMIn) # variable selection
+library(lme4) # GLMM
+```
+
+```{r load & process data, include=FALSE}
+
+# Load data
+behav.raw <- rbind(
+  read.xlsx('dat.female.xlsx', sheet = "con"),
+  read.xlsx('dat.female.xlsx', sheet = "het")
+) %>%
+  dplyr::select(-("1.sp":"start:2"))
+
+
+###########################
+# 縦長データセットにする
+###########################
+# 各行動形質で縦長に
+for (i in c("position.horizon", "position.vertical", "angle", "activity")) {
+  assign(i, 
+         value = 
+           behav.raw %>%
+           dplyr::select(ID:stimuli.type, contains(i)) %>%
+           gather(key = timing, value = raw, contains(i))
+         )
+}
+position.horizon$timing <- position.horizon$timing %>%
+  str_remove_all("\\.position.horizon")
+position.horizon  <- rename(position.horizon, position.horizon = raw)
+position.vertical <- rename(position.vertical, position.vertical = raw)
+activity <- rename(activity, activity = raw)
+angle    <- rename(angle, angle = raw)
+# 合体
+behav <- cbind(position.horizon,
+               position.vertical$position.vertical,
+               activity$activity,
+               angle$angle) %>%
+  rename("position.vertical" = "position.vertical$position.vertical",
+         "activity" = "activity$activity",
+         "angle" = "angle$angle") %>%
+  drop_na()
+```
+
+
+## Behavior
+各実験で18分の実験の中で1分ごとに計19回、メスの水槽内での位置（水平・鉛直）、活動性、実験オスへの角度を3段階で評価した。  
+このデータをPCAにかけ、PCの値を実験毎に平均し、PC1・PC2の値に種差があるか・相手種の影響があるか、  
+①メス個体をランダム効果に入れたGLMMでの、BICモデル選択
+②２way ANOVA   
+によって評価した。
+
+species stimuli : メスの種  
+stimuli type : オスの種と同種か異種か
+```{r analysis:behavior, echo = FALSE}
+
+cat("
+###########################################\n
+# PCA on 4 behavioral traits\n
+###########################################
+")
+
+### conduct PCA
+pca <- behav %>%
+  dplyr::select("position.horizon":"angle") %>%
+  prcomp(., scale = TRUE) # 各生データをScalingした分析（相間行列に基づく）
+summary(pca)
+pca$rotation
+pca.val <- pca$x %>% 
+  as.data.frame()
+### combine PCA data & raw behavior data
+behav.full <- cbind(behav, pca.val)
+
+### dataset of PC values summarized by each experiment
+behav.sum <- cbind(
+  behav.full %>%
+    group_by(ID.stimuli, stimuli.type, species.stimuli, ID) %>%
+    summarize(PC1.mean = mean(PC1, na.rm=TRUE), 
+            PC1.SD = sd(sd = PC1, na.rm=TRUE)),
+  behav.full %>%
+    group_by(ID.stimuli, stimuli.type, species.stimuli, ID) %>%
+    summarize(PC2.mean = mean(PC2, na.rm=TRUE), 
+            PC2.SD = sd(sd = PC2, na.rm=TRUE)),
+  behav.full %>%
+    group_by(ID.stimuli, stimuli.type, species.stimuli, ID) %>%
+    summarize(PC3.mean = mean(PC3, na.rm=TRUE), 
+            PC3.SD = sd(sd = PC3, na.rm=TRUE))
+) %>%
+  dplyr::select(1:4, contains("PC")) %>% 
+  as.data.frame(.)
+
+### dataset of PC values summarized by each female individual
+behav.ind <- cbind(
+  behav.sum %>%
+    group_by(ID.stimuli, stimuli.type, species.stimuli) %>%
+    summarize(PC1.mean.ind = mean(PC1.mean, na.rm=TRUE), 
+            PC1.SD.ind = sd(sd = PC1.mean, na.rm=TRUE)),
+  behav.sum %>%
+    group_by(ID.stimuli, stimuli.type, species.stimuli) %>%
+    summarize(PC2.mean.ind = mean(PC2.mean, na.rm=TRUE), 
+            PC2.SD.ind = sd(sd = PC2.mean, na.rm=TRUE)),
+  behav.sum %>%
+    group_by(ID.stimuli, stimuli.type, species.stimuli) %>%
+    summarize(PC3.mean.ind = mean(PC3.mean, na.rm=TRUE), 
+            PC3.SD.ind = sd(sd = PC3.mean, na.rm=TRUE))
+) %>%
+  dplyr::select(1:4, contains("PC")) %>% 
+  as.data.frame(.)
+
+cat("
+#######################################################\n
+# GLMM model selections on behavioral PC1 & PC2\n
+#######################################################
+")
+
+PC1.mod <- lmer(PC1.mean ~ stimuli.type + species.stimuli + stimuli.type * species.stimuli + (1|ID.stimuli), data = behav.sum)
+# GLMM
+print("model selection on PC1")
+dredge(PC1.mod, rank = "BIC", options(na.action = "na.fail"))
+
+PC2.mod <- lmer(PC2.mean ~ stimuli.type + species.stimuli + stimuli.type * species.stimuli + (1|ID.stimuli), data = behav.sum)
+# GLMM
+print("model selection on PC2")
+dredge(PC2.mod, rank = "BIC", options(na.action = "na.fail"))
+
+PC3.mod <- lmer(PC3.mean ~ stimuli.type + species.stimuli + stimuli.type * species.stimuli + (1|ID.stimuli), data = behav.sum)
+# GLMM
+print("model selection on PC3")
+dredge(PC3.mod, rank = "BIC", options(na.action = "na.fail"))
+
+
+cat("
+#####################################################################\n
+2 way anova on behavioral PC1 & PC2\n
+#####################################################################\n
+")
+# http://www.quantide.com/wp-content/uploads/2017/02/Three-way-Anova-with-R.pdf
+
+cat("
+mean of individuals (pooled data)\n
+")
+for (pc in c("PC1", "PC2", "PC3")) {
+  y <- paste(pc, "mean.ind", sep = ".") 
+  # 応答変数を表示
+  print(paste("y = ", y, sep = ""))
+  # Full modelを表示
+  m.behav <- aov(behav.ind[, y] ~ stimuli.type * species.stimuli, data = behav.ind)
+  print(summary(m.behav))
+  }
+
+cat("
+Non-pooled data (possibly conservative due to larger sample size)\n
+")
+
+for (pc in c("PC1", "PC2", "PC3")) {
+  y <- paste(pc, "mean", sep = ".") 
+  # 応答変数を表示
+  print(paste("y = ", y, sep = ""))
+  # Full modelを表示
+  m.behav <- aov(behav.sum[, y] ~ stimuli.type * species.stimuli, data = behav.sum)
+  print(summary(m.behav))
+  }
+
+```
+BICベストモデルはPC1・PC2いずれも切片のみのモデルであり、メスの種・オスの種やその組み合わせがモデルの説明率を大きく上げないことが分かる。  
+2 way ANOVAでは、PC1・PC2いずれも、メスの種・オスの種によって行動が有意に違わないことが分かる（Pr(>F) > 0.05)。  
+よって、メスの行動には種間差がなく、かつ相手種によって行動が違わないと結論できる。
+
+## Morphology
+吻端、目の先端、背鰭・胸鰭・腹びれ・臀びれの起点、尾びれ露出部中央の計7点でのLandmark座標変異を集約したPCAで、PC１・PC2の値に種間差があるかt検定
+
+```{r analysis:morphology, echo = FALSE}
+cat("
+#################################################\n
+# t-test on morphological PC1 & PC2\n
+#################################################
+")
+morph <- read.xlsx('dat.female.xlsx', sheet = "Morph") %>%
+  select(Id:PC8) %>%
+  mutate_at(vars(species), funs(as.factor(.)))
+morph[11:12,]
+morph.2 <- as.data.frame(morph) %>% drop_na() 
+# ggplot(morph.2, aes(x = PC1, y = PC2)) + geom_point(aes(color = species))
+morph <- split(morph.2, morph.2$species)
+
+print(t.test(x = morph$TH$FL, y = morph$TS$FL))
+
+for (i in 1:8) {
+  print(paste("PC", i, sep = ""))
+  print(t.test(x = morph$TH[, paste("PC", i, sep = "")], 
+               y = morph$TS[, paste("PC", i, sep = "")]
+               )
+        )
+}
+
+N <- c(
+  length(morph$TH$species),
+  length(morph$TS$species)
+)
+for (i in 1:8) {
+  pc <- paste("PC", i, sep = "")
+  assign(paste(pc, "value", sep = "."),
+         c(paste(round(mean(morph$TH[,pc]), 3), 
+                 round(sd(morph$TH[,pc]), 3), 
+                 sep = " ± "),
+           paste(round(mean(morph$TS[,pc]), 3), 
+                 round(sd(morph$TS[,pc]), 3), 
+                 sep = " ± ")
+         )
+       )
+}
+fem.summary <- cbind(N, PC1.value, PC2.value, PC3.value, PC4.value, PC5.value, PC6.value, PC7.value, PC8.value)
+row.names(fem.summary) <- c("TH", "TS")
+write.table(fem.summary, "result.fem.summary.csv", quote = F, row.names = T, sep = ",")
+```
+
+全PCで2種間に有意差はなかった。PC5でp値がマージナルだが、PC5の形態変異の説明率は1.5%であり、無視できるものと考えられる。
