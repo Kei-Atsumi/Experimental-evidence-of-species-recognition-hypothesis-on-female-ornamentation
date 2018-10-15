@@ -1,23 +1,14 @@
 ---
-title: "ウグイお見合い実験_分析"
+title: "Analysis on the results of mate choice experiment"
 author: "Keisuke Atsumi"
 date: '`r format(Sys.time(), "%y/%m/%d %H:%M")`'
 output: html_document
 ---
 
-## 論文用のScript
-
-Ugui_1.dataset_01.Rmd の続き。
-使うデータはお見合い相手体サイズ差が5%未満    
-
-効果量は     
-（同種近くにいた時間ー異種近くにいた時間） : time.dif  
-ln（同種近くにいた時間/異種近くにいた時間） : time.ratio.ln  
-両効果量とも正の値で同種への好み、負の値で異種への好みと解釈できる。
 
 #### Abbreviations
-TH: *Tribolodon hakonensis*, ウグイ  
-TS: *Tribolodon sachalinensis*, エゾウグイ  
+TH: *Tribolodon hakonensis*
+TS: *Tribolodon sachalinensis* 
 
 
 ```{r setup, eval=TRUE, include=FALSE}
@@ -36,21 +27,13 @@ library(lubridate)
 
 
 ```{r data wrangling, echo=FALSE}
-######## データ読み込みと効果量付加 ########
-res <- read.table("data.final.csv", sep = ",", head = TRUE)  %>%
+######## Load data & calculate effect size ########
+res <- read.xlsx("dace.matechoice.data.xlsx", sheet = 1)  %>%
   mutate_at(vars(contains("prop")), funs(as.numeric(.)))    %>%
-  mutate(time.dif = (prop.cons - prop.hetero)*18*60)        %>%
-  # (同種といた時間(sec) - 異種といた時間(sec)） → time.dif
-  mutate(time.ratio = (prop.cons / prop.hetero)*100)        %>%
-  # (同種といた時間 - 異種といた時間）*100 → time.ratio
-  mutate(time.ratio.ln = log(prop.cons / prop.hetero))      %>%                
-  # ln(同種といた時間/異種といた時間）→ time.ratio.ln
-  mutate(percentage = (prop.cons - prop.hetero)/(prop.hetero)*100) %>%
+  mutate(time.ratio.ln = log(prop.cons / prop.hetero))      %>%  # calculate effect size              
   mutate_at(vars(FL), funs(as.numeric(.))) %>%              
   mutate_at(vars(species, heterospecifics, type, contains("ID")), funs(as.factor(.)))
-write.table(res, "data.final.2.csv", row.names = F, sep = ",", quote = F)
 
-######## データ選抜 ########
 TS <- filter(res, species == "TS")
 TH <- filter(res, species == "TH")
 
@@ -61,151 +44,42 @@ print(paste("latest exp date", as.Date(max(res$date, na.rm = T), origin = "1899-
 ```
 
 
-## データの分布の確認
+## Check distribution
 
-ノンパラメトリックでは0からの中央値の逸脱を検出できない。  
-パラメトリックで、0からの平均値の逸脱を示す必要がある。  
-そのため、分布が正規分布から逸脱していないか調べる。
-
-```{r plot, warning = FALSE}
+```{r distribution, warning = FALSE}
 
 ############################
-# (同種-異種） 
+# time.ratio.ln 
 ############################
 
-####### 確率密度プロット #######
-prob_dens.dif <- . %>% {
-  ggplot(., aes(time.dif)) + geom_density(colour = "#9BD3EE", fill = "#D0F3FF70")
-}
-prob_dens.dif(TH) + ggtitle("同種-異種 | UGUI") -> p1
-prob_dens.dif(TS) + ggtitle("同種-異種 | EZO") -> p2
-grid.arrange(p1, p2, ncol = 2)
-
-####### Shapiro-Wilk test #######
-# UGUI
-shapiro.test(TH$time.dif)
-# EZO
-shapiro.test(TS$time.dif)
-
-
-############################
-# ln(同種/異種） 
-############################
-
-####### 確率密度プロット #######
+####### Probablity density plot #######
 prob_dens.ratio.ln <- . %>% {
   ggplot(., aes(time.ratio.ln)) + geom_density(colour = "#9BD3EE", fill = "#D0F3FF70")
 }
-prob_dens.ratio.ln(TH) + ggtitle("ln(同種/異種) | UGUI") -> p1
-prob_dens.ratio.ln(TS) + ggtitle("ln(同種/異種) | EZO") -> p2
+prob_dens.ratio.ln(TH) + ggtitle("Preference strength | TH") -> p1
+prob_dens.ratio.ln(TS) + ggtitle("Preference strength | TS") -> p2
 grid.arrange(p1, p2, ncol = 2)
 
 ####### Shapiro-Wilk test #######
-# UGUI
+# TH
 shapiro.test(TH$time.ratio.ln)
-# EZO
+# TS
 shapiro.test(TS$time.ratio.ln)
 
 ```
 
-Shapiro-WIlk検定は、対象が有意に正規分布から逸脱するかを調べるもの、P>0.05なので、正規分布を当てはめても良い。
 
-
-## t検定：平均値は0と有意に異なるか
-仮説は、各種が有意に同種を好むか、つまり、Preference strengthは有意に正か。なので、片側検定をする
+## t-test on preference strength
 
 ```{r test parametric}
 
-###########################
-# ln(同種/異種）
-###########################
-
-##### ウグイ♂の同種への好み #####
+##### TH #####
 t.test(x = TH$time.ratio.ln, alternative = "greater")
-##### エゾ♂の同種への好み #####
+##### TS #####
 t.test(x = TS$time.ratio.ln, alternative = "greater")
-
-###########################
-# (同種-異種）
-###########################
-
-####### ウグイ♂の同種への好み #######
-t.test(x = TH$time.dif, alternative = "greater")
-####### エゾ♂の同種への好み #######
-t.test(x = TS$time.dif, alternative = "greater")
 ```
 
-
-ln(同種/異種）では、両種とも有意に0と異なる同種への好みを示した。  
-（同種-異種）では、エゾウグイのみが有意に0と異なる同種への好みを示した。  
-平均値は正の値だから、ウグイ・エゾウグイ両種とも、見た目に基づいて同種を好んだと結論できる。
-
-```{r summarise, include = FALSE}
-######## データ記述 ########
-# res <- read.xlsx('Matechoice_Result.xlsx', sheet = 1) %>%
-#   filter(ob.sex == "M") %>%  # use only Males
-#   filter(heterospecifics!= "TB") %>%
-#   filter(size.ratio <= 1.05, size.ratio >= 0.95 )
-
-Exp.total <- c(
-  print(length(filter(res, ob.sp == "TH")$ID)),
-  print(length(filter(res, ob.sp == "TS")$ID))
-)
-Exp.exc <- c(
-  print(length(filter(res, ob.sp == "TH")$ID) - length(TH$time.ratio.ln)),
-  print(length(filter(res, ob.sp == "TS")$ID) - length(TS$time.ratio.ln))
-)
-Exp.inc  <- c(
-  print(length(TH$time.ratio.ln)), 
-  print(length(TS$time.ratio.ln))
-  )
-FL <- c(
-  paste(round(mean(TH$FL), 2), round(sd(TH$FL), 2), sep = " ± "), 
-  # 平均・SDを少数点2桁で丸める、区切りは±@TH
-  paste(round(mean(TS$FL), 2), round(sd(TS$FL), 2), sep = " ± ")
-  # 平均・SDを少数点2桁で丸める、区切りは±@TS
-  )
-  # THとTSを並べる
-FL.range <- c(
-  paste(min(TH$FL), max(TH$FL), sep = "–"), 
-  # Range of FL 
-  paste(min(TS$FL), max(TS$FL), sep = "–")
-  # 平均・SDを少数点2桁で丸める、区切りは±@TS
-  )
-  # THとTSを並べる
-time.dif <- c(
-  paste(round(mean(TH$time.dif), 3), round(sd(TH$time.dif), 3), sep = " ± "), 
-  paste(round(mean(TS$time.dif), 3), round(sd(TS$time.dif), 3), sep = " ± ")
-  )
-time.rat <- c(
-  paste(round(mean(TH$time.ratio), 3), round(sd(TH$time.ratio), 3), sep = " ± "), 
-  paste(round(mean(TS$time.ratio), 3), round(sd(TS$time.ratio), 3), sep = " ± ")
-  )
-longer.percent <- c(
-  paste(round(mean(TH$percentage), 3), round(sd(TH$percentage), 3), sep = " ± "), 
-  paste(round(mean(TS$percentage), 3), round(sd(TS$percentage), 3), sep = " ± ")
-  )
-time.rat.ln <- c(
-  paste(round(mean(TH$time.ratio.ln), 3), round(sd(TH$time.ratio.ln), 3), sep = " ± "), 
-  paste(round(mean(TS$time.ratio.ln), 3), round(sd(TS$time.ratio.ln), 3), sep = " ± ")
-  )
-p.val.ratio.ln <- c(
-  round(t.test(x = TH$time.ratio.ln, alternative = "greater")$p.value, 4),
-  round(t.test(x = TS$time.ratio.ln, alternative = "greater")$p.value, 4)
-  )
-p.val.time.dif <- c(
-  round(t.test(x = TH$time.dif, alternative = "greater")$p.value, 4),
-  round(t.test(x = TS$time.dif, alternative = "greater")$p.value, 4)
-  )
-summary <- cbind(Exp.total, Exp.exc, Exp.inc, FL, FL.range, time.dif, time.rat, longer.percent, time.rat.ln, p.val.ratio.ln, p.val.time.dif)
-colnames(summary) <- c(",Exp.total", "Exp.exc", "Exp.inc", 
-                       "body size (mmFL±SD)", "range of body size (mmFL)", 
-                       "difference in association time (sec)", "cons/hetero (percent)",
-                       "percentage longer(cons vs hetero)",
-                       "preference strength (±SD)", "p.val.ratio.ln", "p.val.time.dif")
-row.names(summary) <- c("TH", "TS")
-write.table(summary, "result.summary.csv", quote = F, row.names = T, sep = ",")
-```
+## Load violin-plot function
 
 ```{r flat-violin function, include=FALSE}
 "%||%" <- function(a, b) {
@@ -265,18 +139,19 @@ GeomFlatViolin <-
 )
 ```
 
+# Draw figure
 
 ```{r figure, echo = FALSE}
 violin <- ggplot(res, aes(x = species, y = time.ratio.ln)) +
   labs(y = "preference strength", x = "species") +
-  # Preference = 0に水平線
+  # Preference = 0
   geom_hline(yintercept = 0, linetype = "dotted") +
-  # 右半分Violin plot
+  # Violin plot on right side
   geom_flat_violin(trim=FALSE, scale="count", fill = "grey80", colour = "white") +
   # Bar plot
   stat_summary(fun.data = mean_sdl, fun.args = list(mult = 1), 
                size = 0.5, geom = "pointrange", position = position_nudge(0.05)) +
-  # 左半分Dot plot
+  # Dot plot on left side
   geom_dotplot(binaxis = "y", dotsize = 0.8, stackdir = "down", binwidth = 0.1, 
                position = position_nudge(-0.025)) +
   # theme
@@ -287,32 +162,10 @@ violin <- ggplot(res, aes(x = species, y = time.ratio.ln)) +
 violin
 ggsave(file = 'plot_rat.ln.png', plot = violin, width = 3, height = 3.5)
 ggsave(file = 'plot_rat.ln.eps', plot = violin, width = 3, height = 3.5)
-
-violin <- ggplot(res, aes(x = species, y = time.dif)) +
-  labs(y = "difference in association time (sec)", x = "species") +
-  # Preference = 0に水平線
-  geom_hline(yintercept = 0, linetype = "dotted") +
-  # 右半分Violin plot
-  geom_flat_violin(trim=FALSE, scale="count", fill = "grey80", colour = "white") +
-  # Bar plot
-  stat_summary(fun.data = mean_sdl, fun.args = list(mult = 1), 
-               size = 0.5, geom = "pointrange", position = position_nudge(0.05)) +
-  # 左半分Dot plot
-  geom_dotplot(binaxis = "y", dotsize = 0.8, stackdir = "down", binwidth = 0.1, 
-               position = position_nudge(-0.025)) +
-  # theme
-  theme(axis.text.x = element_text(size=12), axis.text.y = element_text(size=12),
-        axis.title.x = element_text(size=13), axis.title.y = element_text(size=13),
-        panel.background=element_rect(fill='white', colour='black', size=0.3),
-        panel.grid=element_blank(),legend.position="none")
-violin
-ggsave(file = 'plot_time.dif.png', plot = violin, width = 3, height = 3.5)
-ggsave(file = 'plot_time.dif.eps', plot = violin, width = 3, height = 3.5)
 ```
-ln(同種と過ごした時間/異種と過ごした時間)のプロット。  
-右半分はViolin plot（確率分布）、左半分は生データ、中央が平均±SD
 
-## Append: 体サイズが効くかモデル選択
+
+## Appendix: Model choice on effect of male body size on its preference for females
 ```{r FL, echo=FALSE}
 prob_dens.FL <- . %>% {
   ggplot(., aes(FL)) + geom_density(colour = "#9BD3EE", fill = "#D0F3FF70")
@@ -331,7 +184,3 @@ dredge(mod.TH, rank = "BIC", options(na.action = "na.fail"))
 mod.TS <- glm(time.ratio.ln ~ FL, family = "gaussian", data = TS)
 dredge(mod.TS, rank = "BIC", options(na.action = "na.fail"))
 ```
-体サイズはいずれの効果量・種でもベストモデルに現れない  
-→体サイズは好みの説明率を大きく向上させない  
-　→体サイズは好みにあまり影響しない  
-
